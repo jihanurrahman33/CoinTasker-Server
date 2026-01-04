@@ -41,6 +41,20 @@ async function run() {
     //users api
     app.post("/users", async (req, res) => {
       const user = req.body;
+      const existingUser = await usersCollection.findOne({ email: user.email });
+      if (existingUser) {
+        return res.send({ message: "User already exists" });
+      }
+      if (user.role === "buyer") {
+        //do something
+        user.coin = 50;
+      } else if (user.role === "worker") {
+        //do something
+        user.coin = 10;
+      }
+
+      user.createdAt = new Date();
+
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
