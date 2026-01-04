@@ -3,23 +3,43 @@ const express = require("express");
 const cors = require("cors");
 const app = express();
 const port = process.env.PORT || 3000;
+
+var admin = require("firebase-admin");
+
+//var serviceAccount = require("./cointasker-ed5ad-firebase-adminsdk.json");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 //middlewares
 app.use(express.json());
 app.use(cors());
 
-const verifyFirebaseToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
+const verifyFirebaseToken = async (req, res, next) => {
+  const token = req.headers.authorization;
 
   if (!token) {
     return res.status(401).send({ message: "Unauthorized access" });
   }
 
   //verify firebase token here
-
-  next();
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (error) {
+    res.status(401).send({ message: "unauthorized access" });
+  }
 };
 
 const { MongoClient, ServerApiVersion } = require("mongodb");
+const { getAuth } = require("firebase-admin/auth");
 const uri = process.env.MONGODB_URI;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
