@@ -8,12 +8,12 @@ app.use(express.json());
 app.use(cors());
 
 const verifyFirebaseToken = (req, res, next) => {
-  const token = req.headers.Authorization[1];
+  const token = req.headers.authorization?.split(" ")[1];
 
   if (!token) {
     return res.status(401).send({ message: "Unauthorized access" });
   }
-  console.log("Token from client:", token);
+
   //verify firebase token here
 
   next();
@@ -53,7 +53,7 @@ async function run() {
     //users api
 
     //get user role
-    app.get("/users/:email/role", async (req, res) => {
+    app.get("/users/:email/role", verifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
       const user = await usersCollection.findOne(query);
