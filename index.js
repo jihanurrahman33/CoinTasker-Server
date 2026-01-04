@@ -7,6 +7,18 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 app.use(cors());
 
+const verifyFirebaseToken = (req, res, next) => {
+  const token = req.headers.Authorization[1];
+
+  if (!token) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  console.log("Token from client:", token);
+  //verify firebase token here
+
+  next();
+};
+
 const { MongoClient, ServerApiVersion } = require("mongodb");
 const uri = process.env.MONGODB_URI;
 
@@ -39,6 +51,16 @@ async function run() {
     });
 
     //users api
+
+    //get user role
+    app.get("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      res.send(user);
+    });
+
+    //create user
     app.post("/users", async (req, res) => {
       const user = req.body;
       const existingUser = await usersCollection.findOne({ email: user.email });
