@@ -53,9 +53,11 @@ const client = new MongoClient(uri, {
 //collections names
 const collections = {
   USERS: "users",
+  TASKS: "tasks",
 };
 const database = client.db("CoinTaskerDB");
 const usersCollection = database.collection(collections.USERS);
+const tasksCollection = database.collection(collections.TASKS);
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -105,6 +107,41 @@ async function run() {
 
       const result = await usersCollection.insertOne(user);
       res.send(result);
+    });
+
+    //tasks related apis
+    app.post("/tasks", verifyFirebaseToken, async (req, res) => {
+      const task = req.body;
+      task.createdAt = new Date();
+      //deduct coins from user
+      const buyerEmail = task.buyer_email;
+      const buyer = await usersCollection.findOne({ email: buyerEmail });
+      if (!buyer) {
+        return res.status(404).send({ message: "Buyer not found" });
+      }
+      if (buyer.coin < task.total_payable_amount) {
+        return res
+          .status(400)
+          .send({ message: "Insufficient coins to create task" });
+      }
+      const updatedCoin = buyer.coin - task.total_payable_amount;
+      await usersCollection.updateOne(
+        { email: buyerEmail },
+        { $set: { coin: updatedCoin } }
+      );
+      const result = await tasksCollection.insertOne(task);
+      res.send(result);
+    });
+    //get tasks
+    app.get("/tasks", verifyFirebaseToken, async (req, res) => {
+      const email = req.query.email;
+      let query = {};
+      if (email) {
+        query = { assignedTo: email };
+      }
+      const cursor = tasksCollection.find(query);
+      const tasks = await cursor.toArray();
+      res.send(tasks);
     });
 
     app.listen(port, () => {
