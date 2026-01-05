@@ -137,7 +137,7 @@ async function run() {
       const email = req.query.email;
       let query = {};
       if (email) {
-        query = { assignedTo: email };
+        query = { buyer_email: email };
       }
       const cursor = tasksCollection.find(query);
       const tasks = await cursor.toArray();
