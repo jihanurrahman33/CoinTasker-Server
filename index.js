@@ -79,6 +79,12 @@ async function run() {
       const user = await usersCollection.findOne(query);
       res.send(user);
     });
+    app.get("/users/:email/coin", verifyFirebaseToken, async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      res.send(user);
+    });
 
     //create user
     app.post("/users", async (req, res) => {
