@@ -241,7 +241,11 @@ async function run() {
     //get my submissions
     app.get("/submissions/my", verifyFirebaseToken, async (req, res) => {
       const workerEmail = req.query.worker_email;
-      const query = { worker_email: workerEmail };
+      const status = req.query.status;
+      let query = { worker_email: workerEmail };
+      if (status) {
+        query.status = status;
+      }
       const cursor = submissionsCollection.find(query);
       const submissions = await cursor.toArray();
       res.send(submissions);
@@ -367,6 +371,39 @@ async function run() {
       const cursor = paymentsCollection.find(query);
       const payments = await cursor.toArray();
       res.send(payments);
+    });
+
+    //get workeer stats
+    ///worker/stats?email={user.email}
+    app.get("/worker/stats", verifyFirebaseToken, async (req, res) => {
+      const email = req.query.email;
+      const worker = await usersCollection.findOne({ email: email });
+      if (!worker) {
+        return res.status(404).send({ message: "Worker not found" });
+      }
+
+      const totalSubmissions = await submissionsCollection.countDocuments({
+        worker_email: email,
+      });
+
+      const pendingSubmissions = await submissionsCollection.countDocuments({
+        worker_email: email,
+        status: "pending",
+      });
+
+      const earnings = await submissionsCollection
+        .aggregate([
+          { $match: { worker_email: email, status: "approved" } },
+          { $group: { _id: null, total: { $sum: "$payable_amount" } } },
+        ])
+        .toArray();
+
+      res.send({
+        task_completed: worker.task_completed,
+        totalSubmissions,
+        pendingSubmissions,
+        totalEarnings: earnings[0]?.total || 0,
+      });
     });
 
     app.listen(port, () => {
