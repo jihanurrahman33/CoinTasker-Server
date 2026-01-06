@@ -229,6 +229,44 @@ async function run() {
       res.send(submissions);
     });
 
+    app.get("/buyer/stats", verifyFirebaseToken, async (req, res) => {
+      const email = req.query.email;
+      const totalTasks = await tasksCollection.countDocuments({
+        buyer_email: email,
+      });
+
+      const pendingTasks = await submissionsCollection.countDocuments({
+        buyer_email: email,
+        status: "pending",
+      });
+
+      const payments = await submissionsCollection
+        .aggregate([
+          { $match: { buyer_email: email, status: "approved" } },
+          { $group: { _id: null, total: { $sum: "$payable_amount" } } },
+        ])
+        .toArray();
+
+      res.send({
+        totalTasks,
+        pendingTasks,
+        totalPaymentPaid: payments[0]?.total || 0,
+      });
+    });
+
+    // Fetch Pending Submissions
+    app.get(
+      "/submissions/buyer-pending",
+      verifyFirebaseToken,
+      async (req, res) => {
+        const email = req.query.email;
+        const query = { buyer_email: email, status: "pending" };
+        const cursor = submissionsCollection.find(query);
+        const submissions = await cursor.toArray();
+        res.send(submissions);
+      }
+    );
+
     app.listen(port, () => {
       console.log(`Server is running on port ${port}`);
     });
