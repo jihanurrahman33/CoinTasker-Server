@@ -455,6 +455,39 @@ async function run() {
       });
     });
 
+    // GET ADMIN STATS
+    app.get("/admin-stats", verifyFirebaseToken, async (req, res) => {
+      try {
+        const [totalWorkers, totalBuyers] = await Promise.all([
+          usersCollection.countDocuments({ role: "worker" }),
+          usersCollection.countDocuments({ role: "buyer" }),
+        ]);
+
+        const coinsAggregation = await usersCollection
+          .aggregate([{ $group: { _id: null, totalCoins: { $sum: "$coin" } } }])
+          .toArray();
+
+        const paymentsAggregation = await submissionsCollection
+          .aggregate([
+            { $match: { status: "approved" } },
+            {
+              $group: { _id: null, totalPayments: { $sum: "$payable_amount" } },
+            },
+          ])
+          .toArray();
+
+        res.send({
+          totalWorkers,
+          totalBuyers,
+          totalAvailableCoins: coinsAggregation[0]?.totalCoins || 0,
+          totalPayments: paymentsAggregation[0]?.totalPayments || 0,
+        });
+      } catch (error) {
+        console.error("Admin stats error:", error);
+        res.status(500).send({ message: "Failed to load admin stats" });
+      }
+    });
+
     app.listen(port, () => {
       console.log(`Server is running on port ${port}`);
     });
