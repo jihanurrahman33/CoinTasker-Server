@@ -113,6 +113,7 @@ async function run() {
       const result = await usersCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
+    //get user coins
     app.get("/users/:email/coin", verifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
