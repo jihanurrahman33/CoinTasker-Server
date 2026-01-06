@@ -80,6 +80,45 @@ async function run() {
       res.send("Server is up and running");
     });
 
+    //verify admin middleware
+    const verifyAdmin = async (req, res, next) => {
+      const requesterEmail = req.decoded_email;
+      const requesterAccount = await usersCollection.findOne({
+        email: requesterEmail,
+      });
+      if (requesterAccount && requesterAccount.role === "admin") {
+        next();
+      } else {
+        res.status(403).send({ message: "forbidden access" });
+      }
+    };
+
+    //verify buyer middleware
+    const verifyBuyer = async (req, res, next) => {
+      const requesterEmail = req.decoded_email;
+      const requesterAccount = await usersCollection.findOne({
+        email: requesterEmail,
+      });
+      if (requesterAccount && requesterAccount.role === "buyer") {
+        next();
+      } else {
+        res.status(403).send({ message: "forbidden access" });
+      }
+    };
+
+    //verify worker middleware
+    const verifyWorker = async (req, res, next) => {
+      const requesterEmail = req.decoded_email;
+      const requesterAccount = await usersCollection.findOne({
+        email: requesterEmail,
+      });
+      if (requesterAccount && requesterAccount.role === "worker") {
+        next();
+      } else {
+        res.status(403).send({ message: "forbidden access" });
+      }
+    };
+
     //USERS RELATED APIS
     //get users
     app.get("/users", verifyFirebaseToken, async (req, res) => {
@@ -103,16 +142,21 @@ async function run() {
       res.send(user);
     });
     //update user role by admin
-    app.patch("/users/role/:id", verifyFirebaseToken, async (req, res) => {
-      const id = req.params.id;
-      const { role } = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: { role: role },
-      };
-      const result = await usersCollection.updateOne(filter, updateDoc);
-      res.send(result);
-    });
+    app.patch(
+      "/users/role/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const { role } = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { role: role },
+        };
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      }
+    );
     //get user coins
     app.get("/users/:email/coin", verifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
@@ -155,50 +199,60 @@ async function run() {
       res.send(result);
     });
 
-    //delete user
-    app.delete("/users/:id", verifyFirebaseToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
+    //delete user by admin
+    app.delete(
+      "/users/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
 
-      try {
-        // 1️Get user from MongoDB
-        const dbUser = await usersCollection.findOne(filter);
+        try {
+          // 1️Get user from MongoDB
+          const dbUser = await usersCollection.findOne(filter);
 
-        if (dbUser?.email) {
-          // 2 Get Firebase user using email
-          const firebaseUser = await admin.auth().getUserByEmail(dbUser.email);
+          if (dbUser?.email) {
+            // 2 Get Firebase user using email
+            const firebaseUser = await admin
+              .auth()
+              .getUserByEmail(dbUser.email);
 
-          // 3️Delete from Firebase Auth
-          await admin.auth().deleteUser(firebaseUser.uid);
-        }
-        //check the user role and delete related data
-        if (dbUser.role === "buyer") {
-          //delete all tasks created by this buyer
-          await tasksCollection.deleteMany({ buyer_email: dbUser.email });
-          //delete all submissions related to this buyer
-          await submissionsCollection.deleteMany({ buyer_email: dbUser.email });
-        } else if (dbUser.role === "worker") {
-          //delete all submissions made by this worker
-          await submissionsCollection.deleteMany({
-            worker_email: dbUser.email,
+            // 3️Delete from Firebase Auth
+            await admin.auth().deleteUser(firebaseUser.uid);
+          }
+          //check the user role and delete related data
+          if (dbUser.role === "buyer") {
+            //delete all tasks created by this buyer
+            await tasksCollection.deleteMany({ buyer_email: dbUser.email });
+            //delete all submissions related to this buyer
+            await submissionsCollection.deleteMany({
+              buyer_email: dbUser.email,
+            });
+          } else if (dbUser.role === "worker") {
+            //delete all submissions made by this worker
+            await submissionsCollection.deleteMany({
+              worker_email: dbUser.email,
+            });
+          }
+
+          // 4️ Delete from MongoDB
+          const result = await usersCollection.deleteOne(filter);
+
+          res.send(result);
+        } catch (error) {
+          console.error("Error deleting user:", error);
+          res.status(500).send({
+            success: false,
+            message: error.message,
           });
         }
-
-        // 4️ Delete from MongoDB
-        const result = await usersCollection.deleteOne(filter);
-
-        res.send(result);
-      } catch (error) {
-        console.error("Error deleting user:", error);
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
       }
-    });
+    );
 
     //TASKS RELATED APIs
-    app.post("/tasks", verifyFirebaseToken, async (req, res) => {
+    //create a task
+    app.post("/tasks", verifyFirebaseToken, verifyBuyer, async (req, res) => {
       const task = req.body;
       task.createdAt = new Date();
       //deduct coins from user
@@ -249,16 +303,21 @@ async function run() {
     });
 
     //update a task
-    app.patch("/tasks/:id", verifyFirebaseToken, async (req, res) => {
-      const id = req.params.id;
-      const updates = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: updates,
-      };
-      const result = await tasksCollection.updateOne(filter, updateDoc);
-      res.send(result);
-    });
+    app.patch(
+      "/tasks/:id",
+      verifyFirebaseToken,
+      verifyBuyer,
+      async (req, res) => {
+        const id = req.params.id;
+        const updates = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: updates,
+        };
+        const result = await tasksCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      }
+    );
 
     //delete a task
     app.delete("/tasks/:id", verifyFirebaseToken, async (req, res) => {
@@ -284,45 +343,52 @@ async function run() {
 
     //SUBMISSIONS RELATED APIS
     //create a submission
-    app.post("/submissions", verifyFirebaseToken, async (req, res) => {
-      const submission = req.body;
-      submission.createdAt = new Date();
-      const workerEmail = submission.worker_email;
-      const worker = await usersCollection.findOne({ email: workerEmail });
-      if (!worker) {
-        return res.status(404).send({ message: "Worker not found" });
-      }
+    app.post(
+      "/submissions",
+      verifyFirebaseToken,
+      verifyWorker,
+      async (req, res) => {
+        const submission = req.body;
+        submission.createdAt = new Date();
+        const workerEmail = submission.worker_email;
+        const worker = await usersCollection.findOne({ email: workerEmail });
+        if (!worker) {
+          return res.status(404).send({ message: "Worker not found" });
+        }
 
-      //check duplicate submission for the same task by the same worker
-      const existingSubmission = await submissionsCollection.findOne({
-        task_id: submission.task_id,
-        worker_email: workerEmail,
-      });
-      if (existingSubmission) {
-        return res
-          .status(400)
-          .send({ message: "You have already submitted for this task" });
-      }
-      //decresese required_workers in task
-      const taskId = submission.task_id;
-      const task = await tasksCollection.findOne({ _id: new ObjectId(taskId) });
-      if (!task) {
-        return res.status(404).send({ message: "Task not found" });
-      }
-      if (task.required_workers <= 0) {
-        return res
-          .status(400)
-          .send({ message: "No more workers required for this task" });
-      }
-      const updatedRequiredWorkers = task.required_workers - 1;
-      await tasksCollection.updateOne(
-        { _id: new ObjectId(taskId) },
-        { $set: { required_workers: updatedRequiredWorkers } }
-      );
+        //check duplicate submission for the same task by the same worker
+        const existingSubmission = await submissionsCollection.findOne({
+          task_id: submission.task_id,
+          worker_email: workerEmail,
+        });
+        if (existingSubmission) {
+          return res
+            .status(400)
+            .send({ message: "You have already submitted for this task" });
+        }
+        //decresese required_workers in task
+        const taskId = submission.task_id;
+        const task = await tasksCollection.findOne({
+          _id: new ObjectId(taskId),
+        });
+        if (!task) {
+          return res.status(404).send({ message: "Task not found" });
+        }
+        if (task.required_workers <= 0) {
+          return res
+            .status(400)
+            .send({ message: "No more workers required for this task" });
+        }
+        const updatedRequiredWorkers = task.required_workers - 1;
+        await tasksCollection.updateOne(
+          { _id: new ObjectId(taskId) },
+          { $set: { required_workers: updatedRequiredWorkers } }
+        );
 
-      const result = await submissionsCollection.insertOne(submission);
-      res.send(result);
-    });
+        const result = await submissionsCollection.insertOne(submission);
+        res.send(result);
+      }
+    );
 
     //get my submissions
     app.get("/submissions/my", verifyFirebaseToken, async (req, res) => {
@@ -354,6 +420,7 @@ async function run() {
     app.patch(
       "/submissions/approve/:id",
       verifyFirebaseToken,
+      verifyBuyer,
       async (req, res) => {
         const id = req.params.id;
         const filter = { _id: new ObjectId(id) };
@@ -393,6 +460,7 @@ async function run() {
     app.patch(
       "/submissions/reject/:id",
       verifyFirebaseToken,
+      verifyBuyer,
       async (req, res) => {
         const id = req.params.id;
         const { taskId } = req.body;
@@ -426,32 +494,37 @@ async function run() {
 
     //WITHDRAWALS APIs
     //create a withdrawal request
-    app.post("/withdrawals", verifyFirebaseToken, async (req, res) => {
-      const withdrawal = req.body;
+    app.post(
+      "/withdrawals",
+      verifyFirebaseToken,
+      verifyWorker,
+      async (req, res) => {
+        const withdrawal = req.body;
 
-      withdrawal.createdAt = new Date();
-      withdrawal.status = "pending";
-      const workerEmail = withdrawal.worker_email;
-      const worker = await usersCollection.findOne({ email: workerEmail });
-      console.log("Withdrawal request received:", withdrawal);
-      if (!worker) {
-        return res.status(404).send({ message: "Worker not found" });
+        withdrawal.createdAt = new Date();
+        withdrawal.status = "pending";
+        const workerEmail = withdrawal.worker_email;
+        const worker = await usersCollection.findOne({ email: workerEmail });
+        console.log("Withdrawal request received:", withdrawal);
+        if (!worker) {
+          return res.status(404).send({ message: "Worker not found" });
+        }
+        if (worker.coin < withdrawal.withdrawal_coin) {
+          return res
+            .status(400)
+            .send({ message: "Insufficient coins for withdrawal" });
+        }
+
+        const updatedCoin = worker.coin - withdrawal.withdrawal_coin;
+
+        await usersCollection.updateOne(
+          { email: workerEmail },
+          { $set: { coin: updatedCoin } }
+        );
+        const result = await withdrawalsCollection.insertOne(withdrawal);
+        res.send(result);
       }
-      if (worker.coin < withdrawal.withdrawal_coin) {
-        return res
-          .status(400)
-          .send({ message: "Insufficient coins for withdrawal" });
-      }
-
-      const updatedCoin = worker.coin - withdrawal.withdrawal_coin;
-
-      await usersCollection.updateOne(
-        { email: workerEmail },
-        { $set: { coin: updatedCoin } }
-      );
-      const result = await withdrawalsCollection.insertOne(withdrawal);
-      res.send(result);
-    });
+    );
     //get withdrawals
     app.get("/withdrawals", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
@@ -469,16 +542,21 @@ async function run() {
       res.send(withdrawals);
     });
     //update withdrawal status by admin
-    app.patch("/withdrawals/:id", verifyFirebaseToken, async (req, res) => {
-      const id = req.params.id;
-      const { status } = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: { status: status },
-      };
-      const result = await withdrawalsCollection.updateOne(filter, updateDoc);
-      res.send(result);
-    });
+    app.patch(
+      "/withdrawals/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const { status } = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { status: status },
+        };
+        const result = await withdrawalsCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      }
+    );
 
     //PAYMENTS RELATED APIS
     //create checkout session
@@ -594,96 +672,113 @@ async function run() {
 
     //STATS RELATED APIS
     //get workeer stats
-    app.get("/worker/stats", verifyFirebaseToken, async (req, res) => {
-      const email = req.query.email;
-      const worker = await usersCollection.findOne({ email: email });
-      if (!worker) {
-        return res.status(404).send({ message: "Worker not found" });
-      }
+    app.get(
+      "/worker/stats",
+      verifyFirebaseToken,
+      verifyWorker,
+      async (req, res) => {
+        const email = req.query.email;
+        const worker = await usersCollection.findOne({ email: email });
+        if (!worker) {
+          return res.status(404).send({ message: "Worker not found" });
+        }
 
-      const totalSubmissions = await submissionsCollection.countDocuments({
-        worker_email: email,
-      });
+        const totalSubmissions = await submissionsCollection.countDocuments({
+          worker_email: email,
+        });
 
-      const pendingSubmissions = await submissionsCollection.countDocuments({
-        worker_email: email,
-        status: "pending",
-      });
+        const pendingSubmissions = await submissionsCollection.countDocuments({
+          worker_email: email,
+          status: "pending",
+        });
 
-      const earnings = await submissionsCollection
-        .aggregate([
-          { $match: { worker_email: email, status: "approved" } },
-          { $group: { _id: null, total: { $sum: "$payable_amount" } } },
-        ])
-        .toArray();
-
-      res.send({
-        task_completed: worker.task_completed,
-        totalSubmissions,
-        pendingSubmissions,
-        totalEarnings: earnings[0]?.total || 0,
-      });
-    });
-    //get admin stats
-    app.get("/admin-stats", verifyFirebaseToken, async (req, res) => {
-      try {
-        const [totalWorkers, totalBuyers] = await Promise.all([
-          usersCollection.countDocuments({ role: "worker" }),
-          usersCollection.countDocuments({ role: "buyer" }),
-        ]);
-
-        const coinsAggregation = await usersCollection
-          .aggregate([{ $group: { _id: null, totalCoins: { $sum: "$coin" } } }])
-          .toArray();
-
-        const paymentsAggregation = await withdrawalsCollection
+        const earnings = await submissionsCollection
           .aggregate([
-            { $match: { status: "approved" } },
-            {
-              $group: {
-                _id: null,
-                totalPayments: { $sum: "$withdrawal_amount" },
-              },
-            },
+            { $match: { worker_email: email, status: "approved" } },
+            { $group: { _id: null, total: { $sum: "$payable_amount" } } },
           ])
           .toArray();
 
         res.send({
-          totalWorkers,
-          totalBuyers,
-          totalAvailableCoins: coinsAggregation[0]?.totalCoins || 0,
-          totalPayments: paymentsAggregation[0]?.totalPayments || 0,
+          task_completed: worker.task_completed,
+          totalSubmissions,
+          pendingSubmissions,
+          totalEarnings: earnings[0]?.total || 0,
         });
-      } catch (error) {
-        console.error("Admin stats error:", error);
-        res.status(500).send({ message: "Failed to load admin stats" });
       }
-    });
+    );
+    //get admin stats
+    app.get(
+      "/admin-stats",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const [totalWorkers, totalBuyers] = await Promise.all([
+            usersCollection.countDocuments({ role: "worker" }),
+            usersCollection.countDocuments({ role: "buyer" }),
+          ]);
+
+          const coinsAggregation = await usersCollection
+            .aggregate([
+              { $group: { _id: null, totalCoins: { $sum: "$coin" } } },
+            ])
+            .toArray();
+
+          const paymentsAggregation = await withdrawalsCollection
+            .aggregate([
+              { $match: { status: "approved" } },
+              {
+                $group: {
+                  _id: null,
+                  totalPayments: { $sum: "$withdrawal_amount" },
+                },
+              },
+            ])
+            .toArray();
+
+          res.send({
+            totalWorkers,
+            totalBuyers,
+            totalAvailableCoins: coinsAggregation[0]?.totalCoins || 0,
+            totalPayments: paymentsAggregation[0]?.totalPayments || 0,
+          });
+        } catch (error) {
+          console.error("Admin stats error:", error);
+          res.status(500).send({ message: "Failed to load admin stats" });
+        }
+      }
+    );
     //get buyer stats
-    app.get("/buyer/stats", verifyFirebaseToken, async (req, res) => {
-      const email = req.query.email;
-      const totalTasks = await tasksCollection.countDocuments({
-        buyer_email: email,
-      });
+    app.get(
+      "/buyer/stats",
+      verifyFirebaseToken,
+      verifyBuyer,
+      async (req, res) => {
+        const email = req.query.email;
+        const totalTasks = await tasksCollection.countDocuments({
+          buyer_email: email,
+        });
 
-      const pendingTasks = await submissionsCollection.countDocuments({
-        buyer_email: email,
-        status: "pending",
-      });
+        const pendingTasks = await submissionsCollection.countDocuments({
+          buyer_email: email,
+          status: "pending",
+        });
 
-      const payments = await submissionsCollection
-        .aggregate([
-          { $match: { buyer_email: email, status: "approved" } },
-          { $group: { _id: null, total: { $sum: "$payable_amount" } } },
-        ])
-        .toArray();
+        const payments = await submissionsCollection
+          .aggregate([
+            { $match: { buyer_email: email, status: "approved" } },
+            { $group: { _id: null, total: { $sum: "$payable_amount" } } },
+          ])
+          .toArray();
 
-      res.send({
-        totalTasks,
-        pendingTasks,
-        totalPaymentPaid: payments[0]?.total || 0,
-      });
-    });
+        res.send({
+          totalTasks,
+          pendingTasks,
+          totalPaymentPaid: payments[0]?.total || 0,
+        });
+      }
+    );
 
     app.listen(port, () => {
       console.log(`Server is running on port ${port}`);
