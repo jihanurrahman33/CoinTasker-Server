@@ -69,17 +69,16 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
 
     app.get("/", (req, res) => {
       res.send("Server is up and running");
     });
 
-    //users api
-
+    //USERS RELATED APIS
     //get users
     app.get("/users", verifyFirebaseToken, async (req, res) => {
       const cursor = usersCollection.find();
@@ -154,7 +153,6 @@ async function run() {
     });
 
     //delete user
-    ///users/${user._id}
     app.delete("/users/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
@@ -184,7 +182,7 @@ async function run() {
       }
     });
 
-    //tasks related apis
+    //TASKS RELATED APIs
     app.post("/tasks", verifyFirebaseToken, async (req, res) => {
       const task = req.body;
       task.createdAt = new Date();
@@ -250,12 +248,27 @@ async function run() {
     //delete a task
     app.delete("/tasks/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
+
+      //get the task to refund coins to buyer
+      const task = await tasksCollection.findOne({ _id: new ObjectId(id) });
+      if (task) {
+        const buyerEmail = task.buyer_email;
+        const buyer = await usersCollection.findOne({ email: buyerEmail });
+        if (buyer) {
+          const updatedCoin = buyer.coin + task.total_payable_amount;
+          await usersCollection.updateOne(
+            { email: buyerEmail },
+            { $set: { coin: updatedCoin } }
+          );
+        }
+      }
       const filter = { _id: new ObjectId(id) };
       const result = await tasksCollection.deleteOne(filter);
       res.send(result);
     });
 
-    //submissions related apis
+    //SUBMISSIONS RELATED APIS
+    //create a submission
     app.post("/submissions", verifyFirebaseToken, async (req, res) => {
       const submission = req.body;
       submission.createdAt = new Date();
@@ -307,31 +320,6 @@ async function run() {
       const cursor = submissionsCollection.find(query);
       const submissions = await cursor.toArray();
       res.send(submissions);
-    });
-
-    app.get("/buyer/stats", verifyFirebaseToken, async (req, res) => {
-      const email = req.query.email;
-      const totalTasks = await tasksCollection.countDocuments({
-        buyer_email: email,
-      });
-
-      const pendingTasks = await submissionsCollection.countDocuments({
-        buyer_email: email,
-        status: "pending",
-      });
-
-      const payments = await submissionsCollection
-        .aggregate([
-          { $match: { buyer_email: email, status: "approved" } },
-          { $group: { _id: null, total: { $sum: "$payable_amount" } } },
-        ])
-        .toArray();
-
-      res.send({
-        totalTasks,
-        pendingTasks,
-        totalPaymentPaid: payments[0]?.total || 0,
-      });
     });
 
     // Fetch Pending Submissions
@@ -449,7 +437,6 @@ async function run() {
       const result = await withdrawalsCollection.insertOne(withdrawal);
       res.send(result);
     });
-
     //get withdrawals
     app.get("/withdrawals", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
@@ -466,9 +453,7 @@ async function run() {
       const withdrawals = await cursor.toArray();
       res.send(withdrawals);
     });
-
     //update withdrawal status by admin
-    ///withdrawals/${withdrawalId}
     app.patch("/withdrawals/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
       const { status } = req.body;
@@ -480,8 +465,8 @@ async function run() {
       res.send(result);
     });
 
+    //PAYMENTS RELATED APIS
     //get payment history for a buyer
-    ///payments?email=
     app.get("/payments", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
       const query = { buyer_email: email };
@@ -490,8 +475,8 @@ async function run() {
       res.send(payments);
     });
 
+    //STATS RELATED APIS
     //get workeer stats
-    ///worker/stats?email={user.email}
     app.get("/worker/stats", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
       const worker = await usersCollection.findOne({ email: email });
@@ -522,8 +507,7 @@ async function run() {
         totalEarnings: earnings[0]?.total || 0,
       });
     });
-
-    // GET ADMIN STATS
+    //get admin stats
     app.get("/admin-stats", verifyFirebaseToken, async (req, res) => {
       try {
         const [totalWorkers, totalBuyers] = await Promise.all([
@@ -535,11 +519,14 @@ async function run() {
           .aggregate([{ $group: { _id: null, totalCoins: { $sum: "$coin" } } }])
           .toArray();
 
-        const paymentsAggregation = await submissionsCollection
+        const paymentsAggregation = await withdrawalsCollection
           .aggregate([
             { $match: { status: "approved" } },
             {
-              $group: { _id: null, totalPayments: { $sum: "$payable_amount" } },
+              $group: {
+                _id: null,
+                totalPayments: { $sum: "$withdrawal_amount" },
+              },
             },
           ])
           .toArray();
@@ -554,6 +541,31 @@ async function run() {
         console.error("Admin stats error:", error);
         res.status(500).send({ message: "Failed to load admin stats" });
       }
+    });
+    //get buyer stats
+    app.get("/buyer/stats", verifyFirebaseToken, async (req, res) => {
+      const email = req.query.email;
+      const totalTasks = await tasksCollection.countDocuments({
+        buyer_email: email,
+      });
+
+      const pendingTasks = await submissionsCollection.countDocuments({
+        buyer_email: email,
+        status: "pending",
+      });
+
+      const payments = await submissionsCollection
+        .aggregate([
+          { $match: { buyer_email: email, status: "approved" } },
+          { $group: { _id: null, total: { $sum: "$payable_amount" } } },
+        ])
+        .toArray();
+
+      res.send({
+        totalTasks,
+        pendingTasks,
+        totalPaymentPaid: payments[0]?.total || 0,
+      });
     });
 
     app.listen(port, () => {
