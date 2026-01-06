@@ -55,11 +55,13 @@ const collections = {
   USERS: "users",
   TASKS: "tasks",
   SUBMISSIONS: "submissions",
+  PAYMENTS: "payments",
 };
 const database = client.db("CoinTaskerDB");
 const usersCollection = database.collection(collections.USERS);
 const tasksCollection = database.collection(collections.TASKS);
 const submissionsCollection = database.collection(collections.SUBMISSIONS);
+const paymentsCollection = database.collection(collections.PAYMENTS);
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -356,6 +358,16 @@ async function run() {
         res.send(result);
       }
     );
+
+    //get payment history for a buyer
+    ///payments?email=
+    app.get("/payments", verifyFirebaseToken, async (req, res) => {
+      const email = req.query.email;
+      const query = { buyer_email: email };
+      const cursor = paymentsCollection.find(query);
+      const payments = await cursor.toArray();
+      res.send(payments);
+    });
 
     app.listen(port, () => {
       console.log(`Server is running on port ${port}`);
