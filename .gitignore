@@ -1,3 +1,4 @@
 node_modules
 .env
 cointasker-ed5ad-firebase-adminsdk.json
+.vercel
