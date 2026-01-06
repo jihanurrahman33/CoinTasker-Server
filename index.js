@@ -78,12 +78,30 @@ async function run() {
 
     //users api
 
+    //get users
+    app.get("/users", verifyFirebaseToken, async (req, res) => {
+      const cursor = usersCollection.find();
+      const users = await cursor.toArray();
+      res.send(users);
+    });
+
     //get user role
     app.get("/users/:email/role", verifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
       const user = await usersCollection.findOne(query);
       res.send(user);
+    });
+    //update user role by admin
+    app.patch("/users/role/:id", verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: { role: role },
+      };
+      const result = await usersCollection.updateOne(filter, updateDoc);
+      res.send(result);
     });
     app.get("/users/:email/coin", verifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
@@ -124,6 +142,37 @@ async function run() {
 
       const result = await usersCollection.insertOne(user);
       res.send(result);
+    });
+
+    //delete user
+    ///users/${user._id}
+    app.delete("/users/:id", verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+
+      try {
+        // 1️Get user from MongoDB
+        const dbUser = await usersCollection.findOne(filter);
+
+        if (dbUser?.email) {
+          // 2 Get Firebase user using email
+          const firebaseUser = await admin.auth().getUserByEmail(dbUser.email);
+
+          // 3️Delete from Firebase Auth
+          await admin.auth().deleteUser(firebaseUser.uid);
+        }
+
+        // 4️ Delete from MongoDB
+        const result = await usersCollection.deleteOne(filter);
+
+        res.send(result);
+      } catch (error) {
+        console.error("Error deleting user:", error);
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
     });
 
     //tasks related apis
