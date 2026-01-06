@@ -220,6 +220,15 @@ async function run() {
       res.send(result);
     });
 
+    //get my submissions
+    app.get("/submissions/my", verifyFirebaseToken, async (req, res) => {
+      const workerEmail = req.query.worker_email;
+      const query = { worker_email: workerEmail };
+      const cursor = submissionsCollection.find(query);
+      const submissions = await cursor.toArray();
+      res.send(submissions);
+    });
+
     app.listen(port, () => {
       console.log(`Server is running on port ${port}`);
     });
