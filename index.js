@@ -322,6 +322,41 @@ async function run() {
       }
     );
 
+    //reject a submission
+    app.patch(
+      "/submissions/reject/:id",
+      verifyFirebaseToken,
+      async (req, res) => {
+        const id = req.params.id;
+        const { taskId } = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const submission = await submissionsCollection.findOne(filter);
+        if (!submission) {
+          return res.status(404).send({ message: "Submission not found" });
+        }
+
+        //update submission status to rejected
+        const updateDoc = {
+          $set: { status: "rejected" },
+        };
+        const result = await submissionsCollection.updateOne(filter, updateDoc);
+
+        //increment required_workers in task
+        const task = await tasksCollection.findOne({
+          _id: new ObjectId(taskId),
+        });
+        if (task) {
+          const updatedRequiredWorkers = task.required_workers + 1;
+          await tasksCollection.updateOne(
+            { _id: new ObjectId(taskId) },
+            { $set: { required_workers: updatedRequiredWorkers } }
+          );
+        }
+
+        res.send(result);
+      }
+    );
+
     app.listen(port, () => {
       console.log(`Server is running on port ${port}`);
     });
