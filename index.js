@@ -88,6 +88,18 @@ async function run() {
       res.send(user);
     });
 
+    //get top 6 workers based on coins
+    app.get("/workers/top", async (req, res) => {
+      const query = { role: "worker" };
+      const options = {
+        sort: { coin: -1 },
+        limit: 6,
+      };
+      const cursor = usersCollection.find(query, options);
+      const workers = await cursor.toArray();
+      res.send(workers);
+    });
+
     //create user
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -95,11 +107,12 @@ async function run() {
       if (existingUser) {
         return res.send({ message: "User already exists" });
       }
+
       if (user.role === "buyer") {
         //do something
         user.coin = 50;
       } else if (user.role === "worker") {
-        //do something
+        user.task_completed = 0;
         user.coin = 10;
       }
 
@@ -144,6 +157,22 @@ async function run() {
       res.send(tasks);
     });
 
+    //get task based on required workers greater than 0
+    app.get("/tasks/available", verifyFirebaseToken, async (req, res) => {
+      const query = { required_workers: { $gt: 0 } };
+      const cursor = tasksCollection.find(query);
+      const tasks = await cursor.toArray();
+      res.send(tasks);
+    });
+
+    //get single task by id
+    app.get("/tasks/:id", verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const task = await tasksCollection.findOne(query);
+      res.send(task);
+    });
+
     //update a task
     app.patch("/tasks/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
@@ -153,6 +182,14 @@ async function run() {
         $set: updates,
       };
       const result = await tasksCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
+    //delete a task
+    app.delete("/tasks/:id", verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const result = await tasksCollection.deleteOne(filter);
       res.send(result);
     });
 
