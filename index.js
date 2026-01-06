@@ -450,6 +450,36 @@ async function run() {
       res.send(result);
     });
 
+    //get withdrawals
+    app.get("/withdrawals", verifyFirebaseToken, async (req, res) => {
+      const email = req.query.email;
+      const status = req.query.status;
+
+      let query = {};
+      if (email) {
+        query = { worker_email: email };
+      }
+      if (status) {
+        query.status = status;
+      }
+      const cursor = withdrawalsCollection.find(query);
+      const withdrawals = await cursor.toArray();
+      res.send(withdrawals);
+    });
+
+    //update withdrawal status by admin
+    ///withdrawals/${withdrawalId}
+    app.patch("/withdrawals/:id", verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: { status: status },
+      };
+      const result = await withdrawalsCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
     //get payment history for a buyer
     ///payments?email=
     app.get("/payments", verifyFirebaseToken, async (req, res) => {
