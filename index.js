@@ -170,6 +170,18 @@ async function run() {
           // 3️Delete from Firebase Auth
           await admin.auth().deleteUser(firebaseUser.uid);
         }
+        //check the user role and delete related data
+        if (dbUser.role === "buyer") {
+          //delete all tasks created by this buyer
+          await tasksCollection.deleteMany({ buyer_email: dbUser.email });
+          //delete all submissions related to this buyer
+          await submissionsCollection.deleteMany({ buyer_email: dbUser.email });
+        } else if (dbUser.role === "worker") {
+          //delete all submissions made by this worker
+          await submissionsCollection.deleteMany({
+            worker_email: dbUser.email,
+          });
+        }
 
         // 4️ Delete from MongoDB
         const result = await usersCollection.deleteOne(filter);
