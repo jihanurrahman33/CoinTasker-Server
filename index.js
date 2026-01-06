@@ -3,7 +3,9 @@ const express = require("express");
 const cors = require("cors");
 const app = express();
 const port = process.env.PORT || 3000;
+const Stripe = require("stripe");
 
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 var admin = require("firebase-admin");
 
 //var serviceAccount = require("./cointasker-ed5ad-firebase-adminsdk.json");
@@ -466,13 +468,118 @@ async function run() {
     });
 
     //PAYMENTS RELATED APIS
-    //get payment history for a buyer
+    //create checkout session
+    app.post("/create-checkout-session", async (req, res) => {
+      const { cost, packageName, buyerEmail, coinAmount } = req.body;
+
+      if (!cost || !buyerEmail || !coinAmount) {
+        return res.status(400).send({ message: "Invalid payment data" });
+      }
+
+      const amount = Number(cost) * 100; // cents
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "payment",
+        customer_email: buyerEmail,
+
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: amount,
+              product_data: { name: packageName },
+            },
+            quantity: 1,
+          },
+        ],
+
+        metadata: {
+          buyerEmail,
+          packageName,
+          coinAmount,
+        },
+
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+      });
+
+      res.send({ url: session.url });
+    });
+    //payment success api
+    app.patch("/payment-success", async (req, res) => {
+      const { session_id } = req.query;
+
+      if (!session_id) {
+        return res.status(400).send({ message: "Session ID missing" });
+      }
+
+      const session = await stripe.checkout.sessions.retrieve(session_id);
+
+      if (session.payment_status !== "paid") {
+        return res.status(400).send({ message: "Payment not completed" });
+      }
+
+      const transactionId = session.payment_intent;
+
+      // 🔒 Prevent duplicate credit
+      const alreadyPaid = await paymentsCollection.findOne({ transactionId });
+      if (alreadyPaid) {
+        return res.send({
+          success: true,
+          message: "Payment already processed",
+          transactionId,
+        });
+      }
+
+      const buyerEmail = session.metadata.buyerEmail;
+      const coinAmount = Number(session.metadata.coinAmount);
+
+      // 1️⃣ Update user coin
+      const user = await usersCollection.findOne({ email: buyerEmail });
+      if (!user) return res.status(404).send({ message: "User not found" });
+
+      await usersCollection.updateOne(
+        { email: buyerEmail },
+        { $inc: { coin: coinAmount } }
+      );
+
+      // 2️⃣ Save payment record
+      const paymentDoc = {
+        buyerEmail,
+        packageName: session.metadata.packageName,
+        coinAmount,
+        amount: session.amount_total / 100,
+        currency: session.currency,
+        transactionId,
+        paymentStatus: session.payment_status,
+        paidAt: new Date(),
+      };
+
+      await paymentsCollection.insertOne(paymentDoc);
+
+      res.send({
+        success: true,
+        transactionId,
+        coinAdded: coinAmount,
+      });
+    });
+
+    //get payments
     app.get("/payments", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
-      const query = { buyer_email: email };
-      const cursor = paymentsCollection.find(query);
-      const payments = await cursor.toArray();
-      res.send(payments);
+      const query = {};
+      if (email) {
+        query.buyer_email = email;
+
+        //check email address
+        if (email != req.decoded_email) {
+          res.status(403).send({ message: "forbidden access" });
+        }
+      }
+      const cursor = paymentsCollection.find(query).sort({ paidAt: -1 });
+      const result = await cursor.toArray();
+      res.send(result);
     });
 
     //STATS RELATED APIS
