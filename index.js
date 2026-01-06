@@ -38,7 +38,7 @@ const verifyFirebaseToken = async (req, res, next) => {
   }
 };
 
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const { getAuth } = require("firebase-admin/auth");
 const uri = process.env.MONGODB_URI;
 
@@ -142,6 +142,18 @@ async function run() {
       const cursor = tasksCollection.find(query);
       const tasks = await cursor.toArray();
       res.send(tasks);
+    });
+
+    //update a task
+    app.patch("/tasks/:id", verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const updates = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: updates,
+      };
+      const result = await tasksCollection.updateOne(filter, updateDoc);
+      res.send(result);
     });
 
     app.listen(port, () => {
