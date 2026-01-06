@@ -54,10 +54,12 @@ const client = new MongoClient(uri, {
 const collections = {
   USERS: "users",
   TASKS: "tasks",
+  SUBMISSIONS: "submissions",
 };
 const database = client.db("CoinTaskerDB");
 const usersCollection = database.collection(collections.USERS);
 const tasksCollection = database.collection(collections.TASKS);
+const submissionsCollection = database.collection(collections.SUBMISSIONS);
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -190,6 +192,31 @@ async function run() {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const result = await tasksCollection.deleteOne(filter);
+      res.send(result);
+    });
+
+    //submissions related apis
+    app.post("/submissions", verifyFirebaseToken, async (req, res) => {
+      const submission = req.body;
+      submission.createdAt = new Date();
+      const workerEmail = submission.worker_email;
+      const worker = await usersCollection.findOne({ email: workerEmail });
+      if (!worker) {
+        return res.status(404).send({ message: "Worker not found" });
+      }
+
+      //check duplicate submission for the same task by the same worker
+      const existingSubmission = await submissionsCollection.findOne({
+        task_id: submission.task_id,
+        worker_email: workerEmail,
+      });
+      if (existingSubmission) {
+        return res
+          .status(400)
+          .send({ message: "You have already submitted for this task" });
+      }
+
+      const result = await submissionsCollection.insertOne(submission);
       res.send(result);
     });
 
