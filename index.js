@@ -509,60 +509,57 @@ async function run() {
     //payment success api
     app.patch("/payment-success", async (req, res) => {
       const { session_id } = req.query;
-
-      if (!session_id) {
+      if (!session_id)
         return res.status(400).send({ message: "Session ID missing" });
-      }
 
       const session = await stripe.checkout.sessions.retrieve(session_id);
-
       if (session.payment_status !== "paid") {
         return res.status(400).send({ message: "Payment not completed" });
       }
 
       const transactionId = session.payment_intent;
-
-      // 🔒 Prevent duplicate credit
-      const alreadyPaid = await paymentsCollection.findOne({ transactionId });
-      if (alreadyPaid) {
-        return res.send({
-          success: true,
-          message: "Payment already processed",
-          transactionId,
-        });
-      }
-
       const buyerEmail = session.metadata.buyerEmail;
       const coinAmount = Number(session.metadata.coinAmount);
 
-      // 1️⃣ Update user coin
-      const user = await usersCollection.findOne({ email: buyerEmail });
-      if (!user) return res.status(404).send({ message: "User not found" });
+      try {
+        const result = await paymentsCollection.updateOne(
+          { transactionId },
+          {
+            $setOnInsert: {
+              buyerEmail,
+              packageName: session.metadata.packageName,
+              coinAmount,
+              amount: session.amount_total / 100,
+              currency: session.currency,
+              transactionId,
+              paymentStatus: session.payment_status,
+              paidAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
 
-      await usersCollection.updateOne(
-        { email: buyerEmail },
-        { $inc: { coin: coinAmount } }
-      );
+        if (result.upsertedCount === 1) {
+          await usersCollection.updateOne(
+            { email: buyerEmail },
+            { $inc: { coin: coinAmount } }
+          );
+        }
 
-      // 2️⃣ Save payment record
-      const paymentDoc = {
-        buyerEmail,
-        packageName: session.metadata.packageName,
-        coinAmount,
-        amount: session.amount_total / 100,
-        currency: session.currency,
-        transactionId,
-        paymentStatus: session.payment_status,
-        paidAt: new Date(),
-      };
-
-      await paymentsCollection.insertOne(paymentDoc);
-
-      res.send({
-        success: true,
-        transactionId,
-        coinAdded: coinAmount,
-      });
+        return res.send({
+          success: true,
+          transactionId,
+        });
+      } catch (err) {
+        if (err.code === 11000) {
+          return res.send({
+            success: true,
+            message: "Payment already processed",
+            transactionId,
+          });
+        }
+        throw err;
+      }
     });
 
     //get payments
@@ -570,7 +567,7 @@ async function run() {
       const email = req.query.email;
       const query = {};
       if (email) {
-        query.buyer_email = email;
+        query.buyerEmail = email;
 
         //check email address
         if (email != req.decoded_email) {
