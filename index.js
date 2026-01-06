@@ -215,6 +215,22 @@ async function run() {
           .status(400)
           .send({ message: "You have already submitted for this task" });
       }
+      //decresese required_workers in task
+      const taskId = submission.task_id;
+      const task = await tasksCollection.findOne({ _id: new ObjectId(taskId) });
+      if (!task) {
+        return res.status(404).send({ message: "Task not found" });
+      }
+      if (task.required_workers <= 0) {
+        return res
+          .status(400)
+          .send({ message: "No more workers required for this task" });
+      }
+      const updatedRequiredWorkers = task.required_workers - 1;
+      await tasksCollection.updateOne(
+        { _id: new ObjectId(taskId) },
+        { $set: { required_workers: updatedRequiredWorkers } }
+      );
 
       const result = await submissionsCollection.insertOne(submission);
       res.send(result);
@@ -264,6 +280,45 @@ async function run() {
         const cursor = submissionsCollection.find(query);
         const submissions = await cursor.toArray();
         res.send(submissions);
+      }
+    );
+
+    ///submissions/approve/:id
+    app.patch(
+      "/submissions/approve/:id",
+      verifyFirebaseToken,
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const submission = await submissionsCollection.findOne(filter);
+        if (!submission) {
+          return res.status(404).send({ message: "Submission not found" });
+        }
+
+        //update submission status to approved
+        const updateDoc = {
+          $set: { status: "approved" },
+        };
+        const result = await submissionsCollection.updateOne(filter, updateDoc);
+
+        //update worker's coin and task_completed
+        const workerEmail = submission.worker_email;
+        const worker = await usersCollection.findOne({ email: workerEmail });
+        if (worker) {
+          const updatedCoin = worker.coin + submission.payable_amount;
+          const updatedTasksCompleted = worker.task_completed + 1;
+          await usersCollection.updateOne(
+            { email: workerEmail },
+            {
+              $set: {
+                coin: updatedCoin,
+                task_completed: updatedTasksCompleted,
+              },
+            }
+          );
+        }
+
+        res.send(result);
       }
     );
 
