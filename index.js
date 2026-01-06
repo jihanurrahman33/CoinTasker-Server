@@ -56,12 +56,14 @@ const collections = {
   TASKS: "tasks",
   SUBMISSIONS: "submissions",
   PAYMENTS: "payments",
+  WITHDRAWALS: "withdrawals",
 };
 const database = client.db("CoinTaskerDB");
 const usersCollection = database.collection(collections.USERS);
 const tasksCollection = database.collection(collections.TASKS);
 const submissionsCollection = database.collection(collections.SUBMISSIONS);
 const paymentsCollection = database.collection(collections.PAYMENTS);
+const withdrawalsCollection = database.collection(collections.WITHDRAWALS);
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -83,6 +85,13 @@ async function run() {
       const cursor = usersCollection.find();
       const users = await cursor.toArray();
       res.send(users);
+    });
+    //get single user
+    app.get("/users/:email", verifyFirebaseToken, async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      res.send(user);
     });
 
     //get user role
@@ -411,6 +420,35 @@ async function run() {
         res.send(result);
       }
     );
+
+    //WITHDRAWALS APIs
+    //create a withdrawal request
+    app.post("/withdrawals", verifyFirebaseToken, async (req, res) => {
+      const withdrawal = req.body;
+
+      withdrawal.createdAt = new Date();
+      withdrawal.status = "pending";
+      const workerEmail = withdrawal.worker_email;
+      const worker = await usersCollection.findOne({ email: workerEmail });
+      console.log("Withdrawal request received:", withdrawal);
+      if (!worker) {
+        return res.status(404).send({ message: "Worker not found" });
+      }
+      if (worker.coin < withdrawal.withdrawal_coin) {
+        return res
+          .status(400)
+          .send({ message: "Insufficient coins for withdrawal" });
+      }
+
+      const updatedCoin = worker.coin - withdrawal.withdrawal_coin;
+
+      await usersCollection.updateOne(
+        { email: workerEmail },
+        { $set: { coin: updatedCoin } }
+      );
+      const result = await withdrawalsCollection.insertOne(withdrawal);
+      res.send(result);
+    });
 
     //get payment history for a buyer
     ///payments?email=
