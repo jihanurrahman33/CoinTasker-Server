@@ -2,87 +2,120 @@ const { Router } = require("express");
 const { getCollections } = require("../config/db");
 const { verifyFirebaseToken } = require("../middleware/auth");
 const { verifyBuyer, verifyWorker } = require("../middleware/roles");
+const { SUBMISSION_STATUS } = require("../constants");
+const { HttpError } = require("../utils/httpError");
 const { parseObjectId } = require("../utils/objectId");
+const { omit } = require("../utils/validate");
 
 const router = Router();
 
-router.post("/submissions", verifyFirebaseToken, verifyWorker, async (req, res) => {
-  const { users, tasks, submissions } = getCollections();
-  const submission = req.body;
-  submission.createdAt = new Date();
+/** Fields decided by the server from the task and the token, never the body. */
+const SERVER_OWNED_FIELDS = [
+  "_id",
+  "worker_email",
+  "buyer_email",
+  "payable_amount",
+  "status",
+  "createdAt",
+];
 
-  const workerEmail = submission.worker_email;
-  const worker = await users.findOne({ email: workerEmail });
-  if (!worker) {
-    return res.status(404).send({ message: "Worker not found" });
-  }
+router.post("/submissions", verifyFirebaseToken, verifyWorker, async (req, res) => {
+  const { tasks, submissions } = getCollections();
+  const workerEmail = req.decoded_email;
+  const taskId = req.body.task_id;
+  const taskFilter = { _id: parseObjectId(taskId) };
+
+  const task = await tasks.findOne(taskFilter);
+  if (!task) throw new HttpError(404, "Task not found");
 
   const existing = await submissions.findOne({
-    task_id: submission.task_id,
+    task_id: taskId,
     worker_email: workerEmail,
   });
   if (existing) {
-    return res
-      .status(400)
-      .send({ message: "You have already submitted for this task" });
+    throw new HttpError(400, "You have already submitted for this task");
   }
 
-  const taskFilter = { _id: parseObjectId(submission.task_id) };
-  const task = await tasks.findOne(taskFilter);
-  if (!task) {
-    return res.status(404).send({ message: "Task not found" });
+  // Atomically claim a slot so the task can never be over-subscribed.
+  const claimed = await tasks.updateOne(
+    { ...taskFilter, required_workers: { $gt: 0 } },
+    { $inc: { required_workers: -1 } }
+  );
+  if (claimed.modifiedCount !== 1) {
+    throw new HttpError(400, "No more workers required for this task");
   }
-  if (task.required_workers <= 0) {
-    return res
-      .status(400)
-      .send({ message: "No more workers required for this task" });
-  }
-  await tasks.updateOne(taskFilter, {
-    $set: { required_workers: task.required_workers - 1 },
-  });
 
-  res.send(await submissions.insertOne(submission));
+  const submission = {
+    ...omit(req.body, SERVER_OWNED_FIELDS),
+    worker_email: workerEmail,
+    buyer_email: task.buyer_email,
+    payable_amount: task.payable_amount,
+    status: SUBMISSION_STATUS.PENDING,
+    createdAt: new Date(),
+  };
+
+  try {
+    res.send(await submissions.insertOne(submission));
+  } catch (error) {
+    await tasks.updateOne(taskFilter, { $inc: { required_workers: 1 } });
+    throw error;
+  }
 });
 
 router.get("/submissions/my", verifyFirebaseToken, async (req, res) => {
-  const query = { worker_email: req.query.worker_email };
+  const query = { worker_email: req.decoded_email };
   if (req.query.status) query.status = req.query.status;
   res.send(await getCollections().submissions.find(query).toArray());
 });
 
 router.get("/submissions/buyer-pending", verifyFirebaseToken, async (req, res) => {
-  const query = { buyer_email: req.query.email, status: "pending" };
+  const query = {
+    buyer_email: req.decoded_email,
+    status: SUBMISSION_STATUS.PENDING,
+  };
   res.send(await getCollections().submissions.find(query).toArray());
 });
+
+/**
+ * Moves a pending submission owned by the calling buyer to `status`.
+ * The status filter makes the transition happen at most once, so a
+ * double click or replayed request cannot pay a worker twice.
+ */
+async function resolveSubmission(req, status) {
+  const { submissions } = getCollections();
+  const filter = { _id: parseObjectId(req.params.id) };
+
+  const submission = await submissions.findOne(filter);
+  if (!submission) throw new HttpError(404, "Submission not found");
+  if (submission.buyer_email !== req.decoded_email) {
+    throw new HttpError(403, "forbidden access");
+  }
+
+  const result = await submissions.updateOne(
+    { ...filter, status: SUBMISSION_STATUS.PENDING },
+    { $set: { status } }
+  );
+  if (result.modifiedCount !== 1) {
+    throw new HttpError(409, "Submission has already been reviewed");
+  }
+  return { submission, result };
+}
 
 router.patch(
   "/submissions/approve/:id",
   verifyFirebaseToken,
   verifyBuyer,
   async (req, res) => {
-    const { users, submissions } = getCollections();
-    const filter = { _id: parseObjectId(req.params.id) };
-    const submission = await submissions.findOne(filter);
-    if (!submission) {
-      return res.status(404).send({ message: "Submission not found" });
-    }
+    const { users } = getCollections();
+    const { submission, result } = await resolveSubmission(
+      req,
+      SUBMISSION_STATUS.APPROVED
+    );
 
-    const result = await submissions.updateOne(filter, {
-      $set: { status: "approved" },
-    });
-
-    const worker = await users.findOne({ email: submission.worker_email });
-    if (worker) {
-      await users.updateOne(
-        { email: submission.worker_email },
-        {
-          $set: {
-            coin: worker.coin + submission.payable_amount,
-            task_completed: worker.task_completed + 1,
-          },
-        }
-      );
-    }
+    await users.updateOne(
+      { email: submission.worker_email },
+      { $inc: { coin: submission.payable_amount, task_completed: 1 } }
+    );
     res.send(result);
   }
 );
@@ -92,25 +125,17 @@ router.patch(
   verifyFirebaseToken,
   verifyBuyer,
   async (req, res) => {
-    const { tasks, submissions } = getCollections();
-    const filter = { _id: parseObjectId(req.params.id) };
-    const submission = await submissions.findOne(filter);
-    if (!submission) {
-      return res.status(404).send({ message: "Submission not found" });
-    }
-
-    const result = await submissions.updateOne(filter, {
-      $set: { status: "rejected" },
-    });
+    const { tasks } = getCollections();
+    const { submission, result } = await resolveSubmission(
+      req,
+      SUBMISSION_STATUS.REJECTED
+    );
 
     // Re-open the slot on the task
-    const taskFilter = { _id: parseObjectId(req.body.taskId) };
-    const task = await tasks.findOne(taskFilter);
-    if (task) {
-      await tasks.updateOne(taskFilter, {
-        $set: { required_workers: task.required_workers + 1 },
-      });
-    }
+    await tasks.updateOne(
+      { _id: parseObjectId(submission.task_id) },
+      { $inc: { required_workers: 1 } }
+    );
     res.send(result);
   }
 );
