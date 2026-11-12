@@ -34,7 +34,24 @@ async function connectDb(uri) {
     payments: db.collection(COLLECTION_NAMES.PAYMENTS),
     withdrawals: db.collection(COLLECTION_NAMES.WITHDRAWALS),
   });
+  await ensureIndexes(collections);
   return collections;
+}
+
+/**
+ * Database-level guarantees behind the application checks. A failure (for
+ * example pre-existing duplicate data) is logged but must not stop startup.
+ */
+async function ensureIndexes({ users, submissions, payments }) {
+  try {
+    await Promise.all([
+      users.createIndex({ email: 1 }, { unique: true }),
+      submissions.createIndex({ task_id: 1, worker_email: 1 }, { unique: true }),
+      payments.createIndex({ transactionId: 1 }, { unique: true }),
+    ]);
+  } catch (error) {
+    console.error("Could not create indexes:", error.message);
+  }
 }
 
 function getCollections() {
