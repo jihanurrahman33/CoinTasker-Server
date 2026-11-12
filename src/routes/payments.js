@@ -3,15 +3,23 @@ const config = require("../config");
 const stripe = require("../config/stripe");
 const { getCollections } = require("../config/db");
 const { verifyFirebaseToken } = require("../middleware/auth");
+const { ROLES } = require("../constants");
+const { HttpError } = require("../utils/httpError");
+const { isPositiveNumber } = require("../utils/validate");
 
 const router = Router();
 
-router.post("/create-checkout-session", async (req, res) => {
-  const { cost, packageName, buyerEmail, coinAmount } = req.body;
+router.post("/create-checkout-session", verifyFirebaseToken, async (req, res) => {
+  const { packageName } = req.body;
+  const cost = Number(req.body.cost);
+  const coinAmount = Number(req.body.coinAmount);
 
-  if (!cost || !buyerEmail || !coinAmount) {
-    return res.status(400).send({ message: "Invalid payment data" });
+  if (!isPositiveNumber(cost) || !isPositiveNumber(coinAmount) || !packageName) {
+    throw new HttpError(400, "Invalid payment data");
   }
+
+  // The paying account is always the authenticated one.
+  const buyerEmail = req.decoded_email;
 
   const session = await stripe.checkout.sessions.create({
     payment_method_types: ["card"],
@@ -21,7 +29,7 @@ router.post("/create-checkout-session", async (req, res) => {
       {
         price_data: {
           currency: "usd",
-          unit_amount: Number(cost) * 100, // cents
+          unit_amount: Math.round(cost * 100), // cents
           product_data: { name: packageName },
         },
         quantity: 1,
@@ -39,12 +47,12 @@ router.post("/create-checkout-session", async (req, res) => {
 router.patch("/payment-success", async (req, res) => {
   const { session_id } = req.query;
   if (!session_id) {
-    return res.status(400).send({ message: "Session ID missing" });
+    throw new HttpError(400, "Session ID missing");
   }
 
   const session = await stripe.checkout.sessions.retrieve(session_id);
   if (session.payment_status !== "paid") {
-    return res.status(400).send({ message: "Payment not completed" });
+    throw new HttpError(400, "Payment not completed");
   }
 
   const { payments, users } = getCollections();
@@ -86,20 +94,25 @@ router.patch("/payment-success", async (req, res) => {
   }
 });
 
+// Admins see all payments; everyone else only their own.
 router.get("/payments", verifyFirebaseToken, async (req, res) => {
+  const { users, payments } = getCollections();
   const { email } = req.query;
+
+  const requester = await users.findOne({ email: req.decoded_email });
+  const isAdmin = requester?.role === ROLES.ADMIN;
+
   const query = {};
-  if (email) {
-    query.buyerEmail = email;
-    if (email != req.decoded_email) {
-      res.status(403).send({ message: "forbidden access" });
+  if (!isAdmin) {
+    if (email && email !== req.decoded_email) {
+      throw new HttpError(403, "forbidden access");
     }
+    query.buyerEmail = req.decoded_email;
+  } else if (email) {
+    query.buyerEmail = email;
   }
-  const result = await getCollections()
-    .payments.find(query)
-    .sort({ paidAt: -1 })
-    .toArray();
-  res.send(result);
+
+  res.send(await payments.find(query).sort({ paidAt: -1 }).toArray());
 });
 
 module.exports = router;
