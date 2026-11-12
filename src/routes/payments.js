@@ -18,6 +18,10 @@ router.post("/create-checkout-session", verifyFirebaseToken, async (req, res) =>
     throw new HttpError(400, "Invalid payment data");
   }
 
+  if (coinAmount > cost * config.maxCoinsPerUsd) {
+    throw new HttpError(400, "Coin amount does not match the amount paid");
+  }
+
   // The paying account is always the authenticated one.
   const buyerEmail = req.decoded_email;
 

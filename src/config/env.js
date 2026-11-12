@@ -1,6 +1,7 @@
 require("dotenv").config();
 
-const REQUIRED = ["MONGODB_URI", "STRIPE_SECRET_KEY", "FB_SERVICE_KEY"];
+const DEFAULT_MAX_COINS_PER_USD = 30;
+const REQUIRED =["MONGODB_URI", "STRIPE_SECRET_KEY", "FB_SERVICE_KEY"];
 
 /**
  * Fails fast at startup when a required secret is missing, instead of
@@ -18,6 +19,9 @@ function loadConfig(env = process.env) {
     stripeSecretKey: env.STRIPE_SECRET_KEY,
     firebaseServiceKey: env.FB_SERVICE_KEY,
     siteDomain: env.SITE_DOMAIN || "",
+    // Upper bound on coins sold per US dollar; stops a client from asking
+    // for far more coins than it pays for.
+    maxCoinsPerUsd: Number(env.MAX_COINS_PER_USD) || DEFAULT_MAX_COINS_PER_USD,
   });
 }
 

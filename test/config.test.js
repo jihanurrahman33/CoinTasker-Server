@@ -21,6 +21,11 @@ test("loadConfig honours PORT and SITE_DOMAIN", () => {
   assert.equal(config.siteDomain, "http://x.test");
 });
 
+test("loadConfig defaults and overrides the coin rate cap", () => {
+  assert.equal(loadConfig(validEnv).maxCoinsPerUsd, 30);
+  assert.equal(loadConfig({ ...validEnv, MAX_COINS_PER_USD: "12" }).maxCoinsPerUsd, 12);
+});
+
 test("loadConfig names every missing required variable", () => {
   assert.throws(
     () => loadConfig({ MONGODB_URI: "x" }),
