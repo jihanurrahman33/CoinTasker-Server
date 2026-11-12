@@ -67,8 +67,34 @@ npm run dev
 
 The server will start at `http://localhost:5000` (or your defined PORT).
 
-**Production Match**:
-The `index.js` is the main entry point.
+**Production**:
+```bash
+npm start
+```
+
+**Tests** (built-in `node:test`, no extra dependencies):
+```bash
+npm test
+```
+
+## 🗂️ Project Structure
+
+```
+index.js              # bootstrap: init Firebase, connect Mongo, listen
+src/
+  app.js              # express app factory (middleware + routes)
+  constants.js        # roles and status values
+  config/             # env validation, firebase, mongo (+ indexes), stripe
+  middleware/         # token auth, role guards, central error handler
+  routes/             # one module per domain
+  utils/              # HttpError, ObjectId parsing, validators
+scripts/              # helper scripts (e.g. encode-firebase-key.js)
+test/                 # node:test unit tests
+```
+
+Conventions: handlers throw `HttpError` (Express 5 forwards async errors to
+the central handler); identity always comes from the verified token, never
+from the request body; coin changes use atomic `$inc` updates.
 
 ## 🔗 API Endpoints
 
