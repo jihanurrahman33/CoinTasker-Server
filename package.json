@@ -1,11 +1,16 @@
 {
   "name": "cointasker-server",
   "version": "1.0.0",
-  "description": "",
+  "description": "Backend API for the CoinTasker micro-tasking platform",
   "main": "index.js",
+  "private": true,
   "scripts": {
+    "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [],
   "author": "",

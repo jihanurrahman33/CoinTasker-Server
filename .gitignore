@@ -1,4 +1,9 @@
 node_modules
 .env
-cointasker-ed5ad-firebase-adminsdk.json
+.env.*
+!.env.example
+*-firebase-adminsdk*.json
 .vercel
+coverage
+.DS_Store
+*.log
