@@ -8,12 +8,9 @@ const router = Router();
 const sumOf = (field) => ({ $group: { _id: null, total: { $sum: field } } });
 
 router.get("/worker/stats", verifyFirebaseToken, verifyWorker, async (req, res) => {
-  const { users, submissions } = getCollections();
-  const email = req.query.email;
-  const worker = await users.findOne({ email });
-  if (!worker) {
-    return res.status(404).send({ message: "Worker not found" });
-  }
+  const { submissions } = getCollections();
+  const email = req.decoded_email;
+  const worker = req.user;
 
   const [totalSubmissions, pendingSubmissions, earnings] = await Promise.all([
     submissions.countDocuments({ worker_email: email }),
@@ -55,7 +52,7 @@ router.get("/admin-stats", verifyFirebaseToken, verifyAdmin, async (req, res) =>
 
 router.get("/buyer/stats", verifyFirebaseToken, verifyBuyer, async (req, res) => {
   const { tasks, submissions } = getCollections();
-  const email = req.query.email;
+  const email = req.decoded_email;
 
   const [totalTasks, pendingTasks, payments] = await Promise.all([
     tasks.countDocuments({ buyer_email: email }),
